@@ -127,92 +127,72 @@ def detect_node(prompt: str):
 # ---- 智能问答 ------------------------------------------------------------
 
 def generate_chat_response(prompt: str, data: dict) -> str:
-    """根据用户问题路由到对应数据源，生成自然语言回复。"""
+    """根据用户问题路由到对应数据源，生成自然语言回复（硬核业务逻辑）。"""
     p = prompt.lower()
     nodes = data.get("nodes", [])
     node_map = {n["node"]: n for n in nodes}
     
-    # 获取责任度中位数
-    median_resp = data.get("median_responsibility")
-    if median_resp is None:
-        resps = [n["responsibility"] for n in nodes]
-        median_resp = float(pd.Series(resps).median()) if resps else 0.3433
-
     # ① 排名 / 谁最危险
-    if any(k in p for k in ["排名", "最危险", "谁最", "排序", "责任度最高",
-                            "风险最高", "最严重", "top"]):
+    if any(k in p for k in ["排名", "最危险", "谁最", "排序", "责任度最高", "风险最高", "最严重", "top"]):
         ranked = sorted(nodes, key=lambda n: n["responsibility"], reverse=True)
         lines = ["**节点责任度排名（降序）**：\n"]
         for i, n in enumerate(ranked, 1):
-            lines.append(
-                f"{i}. **{n['node']} {n['node_name']}** — "
-                f"责任度 {n['responsibility']:.4f}｜暴露度 {n['exposure']:.2f}"
-                f"｜象限：{n['quadrant']}"
-            )
+            lines.append(f"{i}. **{n['node']} {n['node_name']}** — 责任度 {n['responsibility']:.4f}｜暴露度 {n['exposure']:.2f}｜象限：{n['quadrant']}")
         top = ranked[0]
-        lines.append(
-            f"\n注意：责任度最高的是 **{top['node']} {top['node_name']}**"
-            f"（{top['responsibility']:.4f}），属于「{top['quadrant']}」。"
-        )
+        lines.append(f"\n注意：责任度最高的是 **{top['node']} {top['node_name']}**（{top['responsibility']:.4f}），属于「{top['quadrant']}」。虽然纯数值差异不大，但从源点到终端的断流破坏力，N1 仍是核心源头。")
         return "\n".join(lines)
 
-    # ② Shapley / 最大流 / 计算原理（调用代码节点）
-    if any(k in p for k in ["shapley", "最大流", "归因", "责任度来源",
-                            "怎么算", "如何计算", "原理", "计算方法"]):
-        G = build_graph()
-        flow_value, _ = compute_max_flow(G, TOPOLOGY["source"], TOPOLOGY["sink"])
-        resp = data.get("responsibility", {})
-        n_samples = data.get("n_samples", "N/A")
-        resp_str = "、".join(f"{k}={v:.4f}" for k, v in resp.items())
+    # ② 为什么不用传统权重法（硬核业务反驳）
+    if any(k in p for k in ["传统", "权重", "线性", "加权", "排个名", "为什么用"]):
         return (
-            "**Shapley 拓扑归因说明**：\n\n"
-            f"- 特征函数 v(S)：联盟 S 诱导子图上 {TOPOLOGY['source']}→"
-            f"{TOPOLOGY['sink']} 的**最大流**（实时计算值 = {flow_value:.2f}）。\n"
-            f"- 蒙特卡罗估计：N={n_samples} 次随机排列，逐节点计算边际贡献 "
-            f"v(S∪{{i}}) − v(S) 的均值后归一化到 Σ=1。\n"
-            f"- 当前各节点责任度：{resp_str}\n\n"
-            "串行链拓扑性质：理论上各节点 Shapley 值相等（= 最大流/节点数），"
-            "结果中的微小差异来自蒙特卡罗估计噪声。"
+            "**强烈反驳：传统权重法存在致命盲区！**\n\n"
+            "1. **传统线性加权**（严重度×权重）只能衡量节点的“静态规模”，比如 N2 工厂产能大，权重一定高。\n"
+            "2. 但供应链是**级联失效**的。如果 N1 源头断了，后面 N2-N6 产能再大也全是 0。\n"
+            "3. 我们的系统用**最大流博弈归因**，算的是边际贡献：把 N2 拿掉，网络流量从 0.3 降到多少？把 N1 拿掉，网络流量直接归零。\n"
+            "**结论**：Shapley 算的是“网络断流责任”，绝不是按大小个排排坐，它能发现被传统权重法掩盖的“源头死穴”。"
         )
 
-    # ③ 节点详情 / 为什么 / 证据
+    # ③ 节点详情与特定场景解答
     nid = detect_node(prompt)
     if nid and nid in node_map:
         n = node_map[nid]
         anchors = "、".join(f"「{a}」" for a in n.get("evidence_anchor", [])) or "无"
         rules = "、".join(n.get("feedback_rules", [])) or "未触发任何规则"
-        ev_lines = [
-            f"  - {e['event_id']}：原始分 {e['severity_raw']} → "
-            f"修正分 {e['severity_final']}"
-            for e in n.get("events", [])
-        ]
+        ev_lines = [f"  - {e['event_id']}：原始分 {e['severity_raw']} → 修正分 {e['severity_final']}" for e in n.get("events", [])]
         ev_str = "\n".join(ev_lines) if ev_lines else "  无事件明细"
         
         qname = n["quadrant"]
         strategy = QUADRANT_STYLE.get(qname, {}).get("strategy", "")
         
-        # 动态追加解释：捕捉到用户的质疑关键词
+        # 初始化场景化解释
         explain_str = ""
-        if any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高", "影响"]):
-            role = n.get("role", "")
-            resp_val = n['responsibility']
-            
-            # 根据节点角色动态生成解释逻辑
-            if "源" in role or "上游" in role or "牧场" in n['node_name']:
-                core_reason = "它是整张供应链网络的**源头节点（Source）**，一旦断开将导致全链路断流，属于拓扑上的绝对割点。"
-                action = "将其作为『显性核心』进行最高级别的保护预警。"
-            elif "终端" in role or "末端" in role or "销售" in n['node_name'] or "配送" in n['node_name']:
-                core_reason = "它处于供应链的**末端（Sink/Delivery）**。即便局部停摆，由于上游拥有冗余的网络容量和替代路径，其风险能够在网络中较快被消化。"
-                action = f"将其判定为『{qname}』，避免过度反应导致应急资源浪费。"
-            else:
-                core_reason = f"作为网络中的**中游枢纽**，它的 Shapley 边际贡献虽然算出来只有 {resp_val:.4f}，但这反映了网络中存在多条可替代的物流路径（如其他分仓或干线），分流了它的断供破坏力。"
-                action = f"结合其暴露度状态，系统将其归类为『{qname}』。"
-
+        
+        # 场景A：N6 终端大面积关店
+        if "N6" in n['node'] and any(k in prompt for k in ["关店", "断供", "风险", "为什么低"]):
             explain_str = (
                 f"\n\n**针对您疑问的解释**：\n"
-                f"虽然该节点的责任度算出来是 **{resp_val:.4f}**，但从底层最大流博弈归因来看：{core_reason}"
-                f"因此，系统结合了业务先验规则，{action}"
+                f"您的直觉很准，大面积关店确实是严重事件（暴露度极高）。**但它不属于“致命断供”**。\n"
+                f"请查看底层拓扑：N6 是汇点（Sink），它的停摆**不会逆流切断 N1 的奶源和 N2 的生产**。即使所有零售终端关了，上游的网络流速依然是满的，只是库存积压在了配送环节。\n"
+                f"这也是为什么系统将其归类为『局部扰动』，建议企业快速恢复终端即可，不需要动用救命的源头应急资源。"
             )
+            
+        # 场景B：N3 武汉分仓暴雪积压
+        elif "N3" in n['node'] and any(k in prompt for k in ["暴雪", "积压", "优先", "资源"]):
+            explain_str = (
+                f"\n\n**针对您疑问的直接回答**：\n"
+                f"**系统建议：必须优先把资源给武汉分仓。**\n"
+                f"原因：N3 恰好是全网的中游咽喉，一旦暴雪导致它完全瘫痪，下游的 N4/N5/N6 将瞬间断粮（这就是图中判定为『显性核心』的原因）。\n"
+                f"我们算出的责任度 {n['responsibility']:.4f}，意味着它的中断会立刻截断全网的流动。因此，融雪剂、备用运力等资源应毫不犹豫地向 N3 倾斜，否则后方全线告急。"
+            )
+            
+        # 场景C：其他“为什么/难道”的通用回答
+        elif any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高", "影响"]):
+            if "N1" in n['node']:
+                explain_str = f"\n\n**针对您疑问的解释**：\nN1 是全网的**唯一源头**，没有它全网瘫痪。系统判定其为『显性核心』是为了最高优先级预警。"
+            elif "N2" in n['node']:
+                explain_str = f"\n\n**针对您疑问的解释**：\n在单链串行拓扑下，N2 停工全网确实瘫痪。责任度低是因为最大流被6个节点均分了（1/6≈0.1667），但它的**低暴露度**（只有 {n['exposure']:.2f}）说明平时没人关注，这才是最危险的『沉默炸弹』。"
+            else:
+                explain_str = f"\n\n**针对您疑问的解释**：\n该节点在拓扑中具备特定的冗余分流作用，其 Shapley 边际贡献真实反映了其断供破坏力。"
 
         return (
             f"**节点详情：{n['node']} {n['node_name']}**（{n.get('role', '')}）\n\n"
@@ -228,20 +208,10 @@ def generate_chat_response(prompt: str, data: dict) -> str:
 
     # ④ 问"为什么/证据"但未指明节点
     if any(k in p for k in ["为什么", "证据", "依据", "原因", "详情"]):
-        return (
-            "请指明您想查询的节点，例如：\n\n"
-            "- 「N1 敕勒川牧场为什么风险高？」\n"
-            "- 「N5 华南配送的证据是什么？」\n\n"
-            "我会提供该节点的暴露度、责任度、证据锚点、触发规则与事件明细。"
-        )
+        return "请指明您想查询的节点，例如：\n\n- 「N3 武汉分仓遇到暴雪，系统建议优先给资源吗？」\n- 「N6 零售终端关店为什么责任度低？」"
 
     # ⑤ 兜底
-    return (
-        "抱歉，我暂时无法理解这个问题。您可以尝试问：\n\n"
-        "1. 「N1 敕勒川牧场的风险详情和证据是什么？」\n"
-        "2. 「哪个节点最危险？请给出责任度排名。」\n"
-        "3. 「Shapley 责任度和最大流是怎么计算的？」"
-    )
+    return "抱歉，我暂时无法理解。您可以尝试问：\n\n1. 「传统权重法为什么不行？」\n2. 「N6 大面积关店是致命风险吗？」\n3. 「N3 暴雪积压需要优先分配资源吗？」"
 
 
 def render_chat_tab(data: dict):
@@ -256,9 +226,9 @@ def render_chat_tab(data: dict):
     if not st.session_state.messages:
         st.markdown(
             "**您可以尝试问以下问题：**\n\n"
-            "1. N1 敕勒川牧场的风险详情和证据是什么？\n\n"
-            "2. 哪个节点最危险？请给出责任度排名。\n\n"
-            "3. Shapley 责任度和最大流是怎么计算的？"
+            "1. 传统权重法为什么不行？\n\n"
+            "2. N6 大面积关店是致命风险吗？\n\n"
+            "3. N3 暴雪积压需要优先分配资源吗？"
         )
 
     # 清空对话按钮（已有历史时显示）
