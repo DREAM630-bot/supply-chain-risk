@@ -1,48 +1,41 @@
 """
 供应链风险全景测度系统 — 暴露度 × 责任度四象限仪表盘 + 风险智能问答
-==================================================================
-启动方式：
-    cd supply-chain-risk-attribution
-    streamlit run app.py
+（已接入真实大语言模型，带离线兜底）
 """
 
 import json
 import sys
 from pathlib import Path
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from openai import OpenAI
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = PROJECT_ROOT / "data" / "results.json"
 
-# 确保可导入 scripts 目录下的模块（Shapley 代码节点）
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from shapley_engine import build_graph, compute_max_flow, TOPOLOGY  # noqa: E402
 
+# ==========================================
+# 大模型配置 (请在这里填入你的 API Key)
+# ==========================================
+API_KEY = "你的API_KEY填在这里" 
+BASE_URL = "https://open.bigmodel.cn/api/paas/v4/" # 默认使用智谱GLM
+MODEL_NAME = "glm-4-flash" # 免费且极速的模型
+
+# 初始化大模型客户端
+client = OpenAI(api_key=API_KEY, base_url=BASE_URL) if API_KEY and "你的" not in API_KEY else None
+
 # ---- 四象限配置 ----------------------------------------------------------
 QUADRANT_STYLE = {
-    "显性核心": {
-        "color": "#E74C3C",
-        "strategy": "高暴露 × 高责任：该节点既是舆情高风险区又是流量瓶颈，应优先配置应急资源、建立专项预案，实施每日风险例会与冗余备份。",
-    },
-    "隐性关键": {
-        "color": "#F39C12",
-        "strategy": "低暴露 × 高责任：当前舆情平静但拓扑责任重大，属『沉默瓶颈』，需结构加固与冗余备份，定期开展压力测试，防止风险突发传导。",
-    },
-    "局部扰动": {
-        "color": "#3498DB",
-        "strategy": "高暴露 × 低责任：舆情活跃但拓扑影响有限，以监控预警为主，防止风险沿链路传导升级，配置舆情自动告警与快速响应机制。",
-    },
-    "常规节点": {
-        "color": "#27AE60",
-        "strategy": "低暴露 × 低责任：风险与责任均较低，纳入常规观察与周期性复核即可，按季度评估即可，无需专项投入。",
-    },
+    "显性核心": {"color": "#E74C3C", "strategy": "高暴露 × 高责任：应优先配置应急资源、建立专项预案。"},
+    "隐性关键": {"color": "#F39C12", "strategy": "低暴露 × 高责任：属『沉默瓶颈』，需结构加固与冗余备份。"},
+    "局部扰动": {"color": "#3498DB", "strategy": "高暴露 × 低责任：以监控预警为主，防止过度响应。"},
+    "常规节点": {"color": "#27AE60", "strategy": "低暴露 × 低责任：纳入常规观察与周期性复核即可。"},
 }
 
-# ---- 节点别名（问答中的节点识别）------------------------------------------
 NODE_ALIASES = {
     "N1": "N1", "敕勒川": "N1", "牧场": "N1", "奶源": "N1",
     "N2": "N2", "呼和浩特": "N2", "工厂": "N2",
@@ -52,176 +45,138 @@ NODE_ALIASES = {
     "N6": "N6", "零售": "N6", "终端": "N6", "销售": "N6",
 }
 
-
 @st.cache_data
 def load_results() -> dict:
-    """读取 data/results.json。"""
     if not RESULTS_PATH.exists():
-        st.error(f"未找到 {RESULTS_PATH}，请先运行 python scripts/shapley_engine.py")
+        st.error(f"未找到 {RESULTS_PATH}")
         st.stop()
     return json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
 
-
 def build_quadrant_chart(nodes: list, median_exposure: float, median_responsibility: float) -> go.Figure:
-    """构建四象限散点图。"""
     df = pd.DataFrame(nodes)
     fig = px.scatter(
         df, x="exposure", y="responsibility", color="quadrant",
         color_discrete_map={k: v["color"] for k, v in QUADRANT_STYLE.items()},
-        hover_name="node_name",
-        hover_data={"node": True, "exposure": ":.2f", "responsibility": ":.4f", "quadrant": True},
-        title="暴露度 × 责任度四象限分布",
-        labels={"exposure": "暴露度 (Exposure)", "responsibility": "责任度 (Responsibility)", "quadrant": "象限"},
+        hover_name="node_name", hover_data={"node": True, "exposure": ":.2f", "responsibility": ":.4f", "quadrant": True},
+        title="暴露度 × 责任度四象限分布", labels={"exposure": "暴露度", "responsibility": "责任度", "quadrant": "象限"},
     )
-    fig.add_vline(x=median_exposure, line_dash="dash", line_color="gray",
-                  annotation_text=f"暴露度中位数 {median_exposure:.3f}", annotation_position="top left")
-    fig.add_hline(y=median_responsibility, line_dash="dash", line_color="gray",
-                  annotation_text=f"责任度中位数 {median_responsibility:.4f}", annotation_position="top right")
-    fig.update_layout(
-        xaxis=dict(range=[0, 1.05], gridcolor="#EEE"),
-        yaxis=dict(range=[0, max(df["responsibility"].max() * 1.4, 0.25)], gridcolor="#EEE"),
-        legend_title_text="象限", height=520,
-    )
+    fig.add_vline(x=median_exposure, line_dash="dash", line_color="gray", annotation_text=f"暴露度中位数 {median_exposure:.3f}")
+    fig.add_hline(y=median_responsibility, line_dash="dash", line_color="gray", annotation_text=f"责任度中位数 {median_responsibility:.4f}")
+    fig.update_layout(xaxis=dict(range=[0, 1.05]), yaxis=dict(range=[0, max(df["responsibility"].max() * 1.4, 0.25)]), height=520)
     for _, row in df.iterrows():
-        fig.add_annotation(
-            x=row["exposure"], y=row["responsibility"], text=f"{row['node']} {row['node_name']}",
-            showarrow=True, arrowhead=1, arrowsize=0.8, arrowcolor="#888", font=dict(size=10), yshift=12,
-        )
+        fig.add_annotation(x=row["exposure"], y=row["responsibility"], text=f"{row['node']}", showarrow=True, arrowcolor="#888")
     return fig
 
 
-def detect_node(prompt: str):
-    """从问题中识别节点 ID（N1–N6），未识别返回 None。"""
-    for alias, nid in NODE_ALIASES.items():
-        if alias in prompt:
-            return nid
-    return None
-
+# ==========================================
+# 调用大模型生成深度决策回答
+# ==========================================
+def ask_llm(prompt: str, context_data: str) -> str:
+    """将用户问题和底层数据交给大模型进行推理"""
+    if not client:
+        return "系统提示：检测到未配置大模型 API Key，当前无法进行深度智能推理。\n\n（请配置 API Key 以获得完整的动态解释）"
+        
+    system_prompt = f"""
+    你是一个顶级的供应链风险管理专家。你的系统使用了“最大流博弈”和“Shapley值”来量化风险。
+    当前网络是单链拓扑（N1牧场 -> N2工厂 -> N3分仓 -> N4冷链 -> N5配送 -> N6终端）。
+    在单链拓扑中，任何一个节点停摆都会导致全网瘫痪，因此各节点的 Shapley 责任度理论值均等（1/6≈0.1667）。
+    
+    这里为你提供底层数据的上下文：
+    {context_data}
+    
+    回答要求：
+    1. 你必须结合用户的提问，给出明确的业务决策或解释。不要当复读机。
+    2. 如果用户问为什么某个节点责任度低却被判为高责任，请从“业务兜底规则”或“低暴露度（沉默炸弹）”的角度解释。
+    3. 如果用户问末端节点（如N5/N6）断供，请解释“末端停摆不会逆流切断上游，且网络有冗余，属局部扰动”。
+    4. 如果用户对比多个节点，请直接给出“该把钱给谁”的建议。
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"系统提示：调用大模型失败（{str(e)}），请检查网络或 API Key。"
 
 # ---- 智能问答 ------------------------------------------------------------
-
 def generate_chat_response(prompt: str, data: dict) -> str:
-    """根据用户问题路由到对应数据源，生成硬核业务回复。"""
     p = prompt.lower()
     nodes = data.get("nodes", [])
     node_map = {n["node"]: n for n in nodes}
     
-    # 提取问题中提到的所有节点
     found_nodes = []
     for alias, nid in NODE_ALIASES.items():
         if alias in prompt and nid not in found_nodes:
             found_nodes.append(nid)
 
+    # 构建上下文 (Context) 给大模型
+    context_data = ""
+    if len(found_nodes) == 1:
+        n = node_map.get(found_nodes[0], {})
+        context_data = f"当前查询节点：{n.get('node')} {n.get('node_name')}，角色：{n.get('role')}，暴露度：{n.get('exposure')}，责任度：{n.get('responsibility')}，象限：{n.get('quadrant')}。"
+    elif len(found_nodes) >= 2:
+        n1 = node_map.get(found_nodes[0], {})
+        n2 = node_map.get(found_nodes[1], {})
+        context_data = f"当前对比两个节点。节点A：{n1.get('node')} (暴露度{n1.get('exposure')}, 责任度{n1.get('responsibility')}, {n1.get('quadrant')})；节点B：{n2.get('node')} (暴露度{n2.get('exposure')}, 责任度{n2.get('responsibility')}, {n2.get('quadrant')})。"
+
+    # 路由判断：如果是排名、原理、宏观灾难，走硬编码（防止大模型乱算）
+    if any(k in p for k in ["排名", "谁最", "排序"]):
+        ranked = sorted(nodes, key=lambda n: n["responsibility"], reverse=True)
+        lines = ["节点责任度排名（降序）：\n"]
+        for i, n in enumerate(ranked, 1):
+            lines.append(f"{i}. {n['node']} {n['node_name']} — 责任度 {n['responsibility']:.4f}｜象限：{n['quadrant']}")
+        return "\n".join(lines)
+
+    if any(k in p for k in ["全面战争", "全部瘫痪", "全部毁灭"]):
+        return "针对宏观系统性风险的回应：\n\n如果全网瘫痪，最大流归零，Shapley 值失效。本系统定位于局部灾害的级联失效测算，不适用于全面战争。"
+
+    if any(k in p for k in ["shapley", "最大流", "归因", "怎么算"]):
+        return "Shapley 拓扑归因说明：\n\n我们使用最大流作为特征函数，通过 5000 次蒙特卡罗采样计算边际贡献。在单链拓扑下，所有节点分摊断流责任。"
+
     # ==========================================
-    # ① 拦截器：多节点对比与预算决策
+    # 核心：调用大模型进行智能回复
     # ==========================================
-    if len(found_nodes) >= 2:
-        if "N2" in found_nodes and "N5" in found_nodes:
+    if context_data:
+        llm_reply = ask_llm(prompt, context_data)
+        
+        # 如果是单节点查询，把大模型回答包裹在卡片下面
+        if len(found_nodes) == 1:
+            n = node_map[found_nodes[0]]
+            anchors = "、".join(f"「{a}」" for a in n.get("evidence_anchor", [])) or "无"
+            rules = "、".join(n.get("feedback_rules", [])) or "未触发任何规则"
             return (
-                "**高管决策建议：把这笔钱拨给 N2 呼和浩特工厂。**\n\n"
-                "**决策依据**：\n"
-                "1. **N5（华南配送）属于『局部扰动』**：虽然台风导致停摆（高暴露），但它处于末端（Sink）。停摆不会逆流切断上游生产，网络内部的冗余库存足以消化冲击，属于虚假警报。\n"
-                "2. **N2（呼和浩特工厂）属于『隐性关键』**：它是全网的中游核心枢纽（低暴露）。平时没有舆情关注，但一旦设备老化停工，由于其单链拓扑位置，会直接导致下游断流。\n"
-                "**结论**：救火要救“咽喉”，而不是救“末端”。预算应投入 N2 的设备维护与冗余备份。"
-            )
-        elif "N1" in found_nodes and "N3" in found_nodes:
-            return (
-                "**风险性质对比：截然不同。**\n\n"
-                "**N1（敕勒川牧场）—— 源头断绝风险**：它是全网唯一的物理割点。如果出问题，是全链路“无水可流”。防范策略是：寻找备用奶源、增加原奶安全库存。\n"
-                "**N3（武汉分仓）—— 中游阻滞风险**：它是物流转运咽喉。如果出问题，是“水管堵塞”。防范策略是：备用运力、融雪设备、分拣冗余。\n"
-                "**结论**：虽然它们同属『显性核心』，但 N1 治本（保供给），N3 治标（保流通）。"
+                f"节点详情：{n['node']} {n['node_name']}\n\n"
+                f"- 暴露度：{n['exposure']:.2f} | 责任度：{n['responsibility']:.4f} | 象限：{n['quadrant']}\n"
+                f"- 证据锚点：{anchors}\n"
+                f"- 触发规则：{rules}\n\n"
+                f"大模型业务解读：\n{llm_reply}"
             )
         else:
-            n1_info = node_map.get(found_nodes[0], {})
-            n2_info = node_map.get(found_nodes[1], {})
-            return (
-                f"**节点对比分析**：\n\n"
-                f"- **{found_nodes[0]}**：暴露度 {n1_info.get('exposure', 0):.2f}，责任度 {n1_info.get('responsibility', 0):.4f}，属于『{n1_info.get('quadrant', '')}』。\n"
-                f"- **{found_nodes[1]}**：暴露度 {n2_info.get('exposure', 0):.2f}，责任度 {n2_info.get('responsibility', 0):.4f}，属于『{n2_info.get('quadrant', '')}』。\n"
-                f"建议根据其所在拓扑位置采取差异化管控。"
-            )
+            # 多节点对比，直接返回大模型的决策建议
+            return f"智能体决策建议：\n\n{llm_reply}"
 
-    # ==========================================
-    # ② 拦截器：宏观灾难与全面瘫痪边界
-    # ==========================================
-    if any(k in p for k in ["全面战争", "全部瘫痪", "全部毁灭", "系统性崩溃", "全断了"]):
-        return (
-            "**针对宏观系统性风险的回应**：\n\n"
-            "如果发生极端战争或全网瘫痪，所有节点同时失效，全网最大流将直接归零（v(S)=0）。\n"
-            "此时，基于边际贡献的 Shapley 值将全部失效（因为没有增量可以分配了）。\n"
-            "**这属于系统的已知边界**。我们的系统定位于日常供应链的‘局部灾害级联失效’与‘单点断供破坏力测算’。\n"
-            "面对全面战争，企业需要的是国家级的战略储备预案，而非单一供应链的拓扑优化。"
-        )
-
-    # ==========================================
-    # ③ 拦截器：反驳传统权重法
-    # ==========================================
-    if any(k in p for k in ["传统", "权重", "线性", "加权", "排个名", "为什么用"]):
-        return (
-            "**强烈反驳：传统权重法存在致命盲区！**\n\n"
-            "1. **传统线性加权**只能衡量节点的“静态规模”，比如 N2 工厂产能大，权重一定高。\n"
-            "2. 但供应链是**级联失效**的。如果 N1 源头断了，后面 N2-N6 产能再大也全是 0。\n"
-            "3. 我们的系统用**最大流博弈归因**，算的是边际贡献。Shapley 算的是“网络断流责任”，能发现被传统权重法掩盖的“源头死穴”。"
-        )
-
-    # ==========================================
-    # ④ 单节点详情与动态场景解释
-    # ==========================================
-    if len(found_nodes) == 1:
-        nid = found_nodes[0]
-        n = node_map[nid]
-        anchors = "、".join(f"「{a}」" for a in n.get("evidence_anchor", [])) or "无"
-        rules = "、".join(n.get("feedback_rules", [])) or "未触发任何规则"
-        ev_lines = [f"  - {e['event_id']}：原始分 {e['severity_raw']} → 修正分 {e['severity_final']}" for e in n.get("events", [])]
-        ev_str = "\n".join(ev_lines) if ev_lines else "  无事件明细"
-        
-        qname = n["quadrant"]
-        strategy = QUADRANT_STYLE.get(qname, {}).get("strategy", "")
-        explain_str = ""
-        
-        # 动态追加解释
-        if any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高", "影响", "关店", "风险", "暴雪", "积压"]):
-            if "N1" in n['node']:
-                explain_str = f"\n\n**针对您疑问的解释**：\nN1 是全网的**唯一源头**，没有它全网瘫痪。系统判定其为『{qname}』是为了最高优先级预警。"
-            elif "N2" in n['node']:
-                explain_str = f"\n\n**针对您疑问的解释**：\n在单链串行拓扑下，N2 停工全网确实瘫痪。责任度低是因为最大流被6个节点均分了（1/6≈0.1667），但它的**低暴露度**（仅 {n['exposure']:.2f}）说明平时没人关注，这才是最危险的『沉默炸弹』。"
-            elif "N3" in n['node']:
-                explain_str = f"\n\n**针对您疑问的直接回答**：\n**系统建议：必须优先把资源给武汉分仓。**\n原因：N3 恰好是全网的中游咽喉，一旦暴雪导致它完全瘫痪，下游的 N4/N5/N6 将瞬间断粮。因此，融雪剂、备用运力等资源应毫不犹豫地向 N3 倾斜，否则后方全线告急。"
-            elif "N5" in n['node'] or "N6" in n['node']:
-                explain_str = f"\n\n**针对您疑问的解释**：\n您的直觉很准，大面积停摆确实是严重事件（暴露度高）。**但它不属于“致命断供”**。\n请查看底层拓扑：该节点是汇点（Sink），它的停摆**不会逆流切断上游的生产**。即使终端关了，上游的网络流速依然是满的，只是库存积压在了配送环节。\n这也是为什么系统将其归类为『{qname}』，建议快速恢复终端即可，不需要动用救命的源头应急资源。"
-
-        return (
-            f"**节点详情：{n['node']} {n['node_name']}**（{n.get('role', '')}）\n\n"
-            f"- 暴露度 exposure = **{n['exposure']:.2f}**\n"
-            f"- 责任度 responsibility = **{n['responsibility']:.4f}**\n"
-            f"- 四象限分类：**{qname}**\n"
-            f"- 证据锚点：{anchors}\n"
-            f"- Feedback 触发规则：{rules}\n"
-            f"- 事件明细（原始分 → 修正分）：\n{ev_str}\n\n"
-            f"管理策略：{strategy}"
-            f"{explain_str}"
-        )
-
-    # ==========================================
-    # ⑤ 兜底
-    # ==========================================
-    return "抱歉，我暂时无法理解。您可以尝试问：\n\n1. 「传统权重法为什么不行？」\n2. 「台风导致 N5 停摆，N2 也设备老化，预算给谁？」\n3. 「如果全面战争全瘫痪了还能算吗？」"
+    # 兜底
+    return "抱歉，我无法理解。您可以尝试问：“台风导致 N5 停摆，N2 也设备老化，预算给谁？”"
 
 
 def render_chat_tab(data: dict):
-    """渲染风险智能问答 Tab。"""
-    st.subheader("供应链风险智能问答")
+    st.subheader("供应链风险智能问答 (已接入大模型)")
+    
+    if not client:
+        st.warning("当前未配置大模型 API Key，系统将使用离线默认逻辑。请在代码中填入 API_KEY。")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
     if not st.session_state.messages:
-        st.markdown(
-            "**您可以尝试问以下问题：**\n\n"
-            "1. 传统权重法为什么不行？\n\n"
-            "2. 台风导致 N5 停摆，N2 也设备老化，预算给谁？\n\n"
-            "3. N6 大面积关店是致命风险吗？"
-        )
+        st.markdown("您可以尝试问以下问题：\n\n1. 传统权重法为什么不行？\n\n2. 台风导致 N5 停摆，N2 也设备老化，预算给谁？\n\n3. N6 大面积关店是致命风险吗？")
 
     if st.session_state.messages:
         if st.button("清空对话历史"):
@@ -232,12 +187,15 @@ def render_chat_tab(data: dict):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    prompt = st.chat_input("请输入您想查询的供应链风险问题...")
+    prompt = st.chat_input("请输入您的供应链决策问题...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-        reply = generate_chat_response(prompt, data)
+        
+        with st.spinner("智能体正在调用博弈模型与大模型进行推理..."):
+            reply = generate_chat_response(prompt, data)
+            
         with st.chat_message("assistant"):
             st.markdown(reply)
         st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -245,23 +203,18 @@ def render_chat_tab(data: dict):
 
 def main():
     st.set_page_config(page_title="供应链风险四象限仪表盘", layout="wide")
-    st.title("供应链风险全景测度系统 — 暴露度 × 责任度四象限仪表盘")
+    st.title("供应链风险全景测度系统")
 
     data = load_results()
     st.warning(data.get("disclaimer", ""))
-    st.caption(f"网络：{data.get('network_name', '')}　|　聚合策略：{data.get('aggregation_strategy', 'max')}　|　蒙特卡罗样本数：{data.get('n_samples', 'N/A')}")
-
+    
     nodes = data.get("nodes", [])
     if not nodes:
-        st.error("results.json 中无 nodes 数据，请先运行完整流水线。")
+        st.error("results.json 中无 nodes 数据。")
         st.stop()
 
-    median_exposure = data.get("median_exposure")
-    median_responsibility = data.get("median_responsibility")
-    if median_exposure is None:
-        median_exposure = float(pd.Series([n["exposure"] for n in nodes]).median())
-    if median_responsibility is None:
-        median_responsibility = float(pd.Series([n["responsibility"] for n in nodes]).median())
+    median_exposure = data.get("median_exposure", float(pd.Series([n["exposure"] for n in nodes]).median()))
+    median_responsibility = data.get("median_responsibility", float(pd.Series([n["responsibility"] for n in nodes]).median()))
 
     with st.sidebar:
         st.header("节点选择")
@@ -279,53 +232,17 @@ def main():
         fig = build_quadrant_chart(nodes, median_exposure, median_responsibility)
         st.plotly_chart(fig, use_container_width=True)
 
-        q_counts = {}
-        for n in nodes:
-            q_counts[n["quadrant"]] = q_counts.get(n["quadrant"], 0) + 1
-        cols = st.columns(4)
-        for col, (qname, qcfg) in zip(cols, QUADRANT_STYLE.items()):
-            col.markdown(f"<span style='color:{qcfg['color']};font-weight:bold'>● {qname}</span>：{q_counts.get(qname, 0)} 个节点", unsafe_allow_html=True)
-
         st.subheader(f"二、节点详情：{sel['node']} {sel['node_name']}")
         with st.expander("Evidence Anchor 原文", expanded=True):
             anchors = sel.get("evidence_anchor", [])
             if anchors:
-                for i, a in enumerate(anchors, 1):
-                    st.markdown(f"{i}. `{a}`")
-            else:
-                st.info("该节点无有效证据锚点。")
-
-        with st.expander("Feedback 触发的规则列表"):
-            rules = sel.get("feedback_rules", [])
-            if rules:
-                for r in rules:
-                    st.markdown(f"- {r}")
-            else:
-                st.info("该节点未触发任何批判规则（全部维持）。")
-
-        with st.expander("原始分 → 修正分"):
-            events = sel.get("events", [])
-            if events:
-                ev_df = pd.DataFrame([
-                    {"事件": e["event_id"], "来源": e.get("source", ""),
-                     "原始分 severity_raw": e.get("severity_raw"),
-                     "修正分 severity_final": e.get("severity_final"),
-                     "修正说明": e.get("revision_note", "")} for e in events
-                ])
-                st.dataframe(ev_df, use_container_width=True, hide_index=True)
-            else:
-                st.info("该节点无事件明细。")
-
-        with st.expander("象限判定与管理策略"):
-            qname = sel.get("quadrant", "")
-            qcfg = QUADRANT_STYLE.get(qname, {"strategy": "未知象限"})
-            st.markdown(f"**象限**：<span style='color:{qcfg.get('color', '#000')};font-weight:bold'>{qname}</span>", unsafe_allow_html=True)
-            st.markdown(f"**管理策略**：{qcfg['strategy']}")
-            st.markdown(f"**判定依据**：exposure={sel['exposure']:.2f} ({'≥' if sel['exposure'] >= median_exposure else '<'} 中位数 {median_exposure:.3f})，responsibility={sel['responsibility']:.4f} ({'≥' if sel['responsibility'] >= median_responsibility else '<'} 中位数 {median_responsibility:.4f})")
+                for a in anchors: st.markdown(f"- `{a}`")
+            else: st.info("无证据锚点")
+        with st.expander("管理策略"):
+            st.markdown(QUADRANT_STYLE.get(sel['quadrant'], {}).get('strategy', ''))
 
     with tab2:
         render_chat_tab(data)
-
 
 if __name__ == "__main__":
     main()
