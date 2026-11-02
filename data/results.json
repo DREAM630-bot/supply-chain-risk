@@ -1,0 +1,217 @@
+{
+  "network_name": "伊利液态奶供应链6节点有向网络",
+  "disclaimer": "边容量为基于公开产能的相对归一化映射，不声称代表企业内部真实物流货量。",
+  "aggregation_strategy": "max",
+  "median_exposure": 0.525,
+  "median_responsibility": 0.1675,
+  "max_flow": 0.3,
+  "n_samples": 5000,
+  "responsibility": {
+    "N1": 0.1734,
+    "N2": 0.171,
+    "N3": 0.1682,
+    "N4": 0.1558,
+    "N5": 0.1668,
+    "N6": 0.1648
+  },
+  "nodes": [
+    {
+      "node": "N1",
+      "node_name": "敕勒川牧场",
+      "role": "奶源供应商",
+      "exposure": 0.8,
+      "responsibility": 0.1734,
+      "quadrant": "显性核心",
+      "evidence_anchor": [
+        "敕勒川一带牧场产奶量环比下降约15%",
+        "压缩苜蓿采购量"
+      ],
+      "feedback_rules": [],
+      "events": [
+        {
+          "event_id": "E009-2026-03-18-农民日报",
+          "source": "农民日报 2026-03-18",
+          "date": "2026-03-18",
+          "severity_raw": 0.65,
+          "severity_final": 0.65,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.65"
+        },
+        {
+          "event_id": "E004-2026-07-22-新华社",
+          "source": "新华社 2026-07-22",
+          "date": "2026-07-22",
+          "severity_raw": 0.8,
+          "severity_final": 0.8,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.80"
+        }
+      ]
+    },
+    {
+      "node": "N2",
+      "node_name": "呼和浩特工厂",
+      "role": "核心生产",
+      "exposure": 0.5,
+      "responsibility": 0.171,
+      "quadrant": "隐性关键",
+      "evidence_anchor": [
+        "液态奶日产量短期下调约8%",
+        "指标合格但临近标准限值"
+      ],
+      "feedback_rules": [
+        "R3-时效衰减"
+      ],
+      "events": [
+        {
+          "event_id": "E006-2025-11-20-经济观察报",
+          "source": "经济观察报 2025-11-20",
+          "date": "2025-11-20",
+          "severity_raw": 0.55,
+          "severity_final": 0.4,
+          "revision_note": "action=下调，clamp(0.55 + (-0.15), 0, 1) = 0.40"
+        },
+        {
+          "event_id": "E010-2026-04-25-界面新闻",
+          "source": "界面新闻 2026-04-25",
+          "date": "2026-04-25",
+          "severity_raw": 0.5,
+          "severity_final": 0.5,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.50"
+        }
+      ]
+    },
+    {
+      "node": "N3",
+      "node_name": "武汉分仓",
+      "role": "区域仓储",
+      "exposure": 0.6,
+      "responsibility": 0.1682,
+      "quadrant": "显性核心",
+      "evidence_anchor": [
+        "分拣系统出现排队延迟",
+        "单日出库量下降约15%"
+      ],
+      "feedback_rules": [
+        "R3-时效衰减"
+      ],
+      "events": [
+        {
+          "event_id": "E005-2025-10-02-楚天都市报",
+          "source": "楚天都市报 2025-10-02",
+          "date": "2025-10-02",
+          "severity_raw": 0.65,
+          "severity_final": 0.5,
+          "revision_note": "action=下调，clamp(0.65 + (-0.15), 0, 1) = 0.50"
+        },
+        {
+          "event_id": "E012-2026-06-18-湖北日报",
+          "source": "湖北日报 2026-06-18",
+          "date": "2026-06-18",
+          "severity_raw": 0.6,
+          "severity_final": 0.6,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.60"
+        }
+      ]
+    },
+    {
+      "node": "N4",
+      "node_name": "冷链干线",
+      "role": "干线物流",
+      "exposure": 0.45,
+      "responsibility": 0.1558,
+      "quadrant": "常规节点",
+      "evidence_anchor": [
+        "冷链干线运输时效延长12至24小时",
+        "冷链干线绕行增加约200公里"
+      ],
+      "feedback_rules": [
+        "R3-时效衰减",
+        "R4-单因子一致性"
+      ],
+      "events": [
+        {
+          "event_id": "E007-2026-01-12-中国交通报",
+          "source": "中国交通报 2026-01-12",
+          "date": "2026-01-12",
+          "severity_raw": 0.65,
+          "severity_final": 0.4,
+          "revision_note": "action=下调，clamp(0.65 + (-0.25), 0, 1) = 0.40"
+        },
+        {
+          "event_id": "E011-2026-05-30-物流时代周刊",
+          "source": "物流时代周刊 2026-05-30",
+          "date": "2026-05-30",
+          "severity_raw": 0.45,
+          "severity_final": 0.45,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.45"
+        }
+      ]
+    },
+    {
+      "node": "N5",
+      "node_name": "华南配送",
+      "role": "末端配送",
+      "exposure": 0.55,
+      "responsibility": 0.1668,
+      "quadrant": "局部扰动",
+      "evidence_anchor": [
+        "冷库只够撑三天",
+        "生鲜类订单履约时效延长1天"
+      ],
+      "feedback_rules": [
+        "R3-时效衰减",
+        "R4-单因子一致性"
+      ],
+      "events": [
+        {
+          "event_id": "E001-2025-09-08-南方都市报",
+          "source": "南方都市报 2025-09-08",
+          "date": "2025-09-08",
+          "severity_raw": 0.7,
+          "severity_final": 0.45,
+          "revision_note": "action=下调，clamp(0.70 + (-0.25), 0, 1) = 0.45"
+        },
+        {
+          "event_id": "E013-2026-08-10-羊城晚报",
+          "source": "羊城晚报 2026-08-10",
+          "date": "2026-08-10",
+          "severity_raw": 0.55,
+          "severity_final": 0.55,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.55"
+        }
+      ]
+    },
+    {
+      "node": "N6",
+      "node_name": "零售终端",
+      "role": "销售终端",
+      "exposure": 0.5,
+      "responsibility": 0.1648,
+      "quadrant": "常规节点",
+      "evidence_anchor": [
+        "补货周期由2天拉长至4天",
+        "终端库存周转天数由5天降至2天"
+      ],
+      "feedback_rules": [
+        "R3-时效衰减"
+      ],
+      "events": [
+        {
+          "event_id": "E008-2026-02-05-北京青年报",
+          "source": "北京青年报 2026-02-05",
+          "date": "2026-02-05",
+          "severity_raw": 0.6,
+          "severity_final": 0.45,
+          "revision_note": "action=下调，clamp(0.60 + (-0.15), 0, 1) = 0.45"
+        },
+        {
+          "event_id": "E014-2026-09-12-第一财经",
+          "source": "第一财经 2026-09-12",
+          "date": "2026-09-12",
+          "severity_raw": 0.5,
+          "severity_final": 0.5,
+          "revision_note": "action=维持，severity_final = severity_raw = 0.50"
+        }
+      ]
+    }
+  ]
+}
