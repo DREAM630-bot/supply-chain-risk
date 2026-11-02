@@ -21,7 +21,7 @@ from shapley_engine import build_graph, compute_max_flow, TOPOLOGY  # noqa: E402
 # ==========================================
 # 大模型配置 (请在这里填入你的 API Key)
 # ==========================================
-API_KEY = "你的API_KEY填在这里" 
+API_KEY = st.secrets["API_KEY"] 
 BASE_URL = "https://open.bigmodel.cn/api/paas/v4/" # 默认使用智谱GLM
 MODEL_NAME = "glm-4-flash" # 免费且极速的模型
 
