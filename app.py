@@ -22,8 +22,8 @@ from shapley_engine import build_graph, compute_max_flow, TOPOLOGY  # noqa: E402
 # 大模型配置 (请在这里填入你的 API Key)
 # ==========================================
 API_KEY = st.secrets["API_KEY"] 
-BASE_URL = "https://open.bigmodel.cn/api/paas/v4/" # 默认使用智谱GLM
-MODEL_NAME = "glm-4-flash" # 免费且极速的模型
+BASE_URL = "https://api.deepseek.com" 
+MODEL_NAME = "deepseek-chat" # 免费且极速的模型
 
 # 初始化大模型客户端
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL) if API_KEY and "你的" not in API_KEY else None
