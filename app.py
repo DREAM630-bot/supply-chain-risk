@@ -22,7 +22,7 @@ from shapley_engine import build_graph, compute_max_flow, TOPOLOGY  # noqa: E402
 # ==========================================
 API_KEY = st.secrets["API_KEY"] 
 BASE_URL = "https://api.deepseek.com" 
-MODEL_NAME = "deepseek-chat" # 免费且极速的模型
+MODEL_NAME = "deepseek-chat" 
 
 # 初始化大模型客户端
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL) if API_KEY and "你的" not in API_KEY else None
@@ -166,7 +166,7 @@ def generate_chat_response(prompt: str, data: dict) -> str:
 
 
 def render_chat_tab(data: dict):
-    st.subheader("供应链风险智能问答 (已接入大模型)")
+    st.subheader("供应链风险智能问答")
     
     if not client:
         st.warning("当前未配置大模型 API Key，系统将使用离线默认逻辑。请在代码中填入 API_KEY。")
