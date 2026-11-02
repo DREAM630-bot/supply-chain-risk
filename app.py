@@ -127,12 +127,12 @@ def detect_node(prompt: str):
 # ---- 智能问答 ------------------------------------------------------------
 
 def generate_chat_response(prompt: str, data: dict) -> str:
-    """根据用户问题路由到对应数据源，生成自然语言回复（规则路由，非 LLM）。"""
+    """根据用户问题路由到对应数据源，生成自然语言回复。"""
     p = prompt.lower()
     nodes = data.get("nodes", [])
     node_map = {n["node"]: n for n in nodes}
     
-    # 获取责任度中位数，用于动态判定（如果没有就取0.3433）
+    # 获取责任度中位数
     median_resp = data.get("median_responsibility")
     if median_resp is None:
         resps = [n["responsibility"] for n in nodes]
@@ -175,7 +175,7 @@ def generate_chat_response(prompt: str, data: dict) -> str:
             "结果中的微小差异来自蒙特卡罗估计噪声。"
         )
 
-    # ③ 节点详情 / 为什么 / 证据 (重点修改部分)
+    # ③ 节点详情 / 为什么 / 证据
     nid = detect_node(prompt)
     if nid and nid in node_map:
         n = node_map[nid]
@@ -191,23 +191,27 @@ def generate_chat_response(prompt: str, data: dict) -> str:
         qname = n["quadrant"]
         strategy = QUADRANT_STYLE.get(qname, {}).get("strategy", "")
         
-        # 动态修正策略：如果责任度偏低但被分入显性核心，修正底层矛盾话术
-        if n["responsibility"] < median_resp and qname == "显性核心":
-            strategy = (
-                f"高暴露 × 低责任：该节点近期气象/舆情风险极高，但经拓扑博弈计算，"
-                f"其 Shapley 边际贡献（责任度）仅为 {n['responsibility']:.4f}，低于全网中位数。"
-                f"单纯从网络结构看它属于局部扰动，但由于它是全网的源头割点，系统赋予了业务兜底权重，强制升维预警。"
-            )
-        
         # 动态追加解释：捕捉到用户的质疑关键词
         explain_str = ""
-        if any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高"]):
+        if any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高", "影响"]):
+            role = n.get("role", "")
+            resp_val = n['responsibility']
+            
+            # 根据节点角色动态生成解释逻辑
+            if "源" in role or "上游" in role or "牧场" in n['node_name']:
+                core_reason = "它是整张供应链网络的**源头节点（Source）**，一旦断开将导致全链路断流，属于拓扑上的绝对割点。"
+                action = "将其作为『显性核心』进行最高级别的保护预警。"
+            elif "终端" in role or "末端" in role or "销售" in n['node_name'] or "配送" in n['node_name']:
+                core_reason = "它处于供应链的**末端（Sink/Delivery）**。即便局部停摆，由于上游拥有冗余的网络容量和替代路径，其风险能够在网络中较快被消化。"
+                action = f"将其判定为『{qname}』，避免过度反应导致应急资源浪费。"
+            else:
+                core_reason = f"作为网络中的**中游枢纽**，它的 Shapley 边际贡献虽然算出来只有 {resp_val:.4f}，但这反映了网络中存在多条可替代的物流路径（如其他分仓或干线），分流了它的断供破坏力。"
+                action = f"结合其暴露度状态，系统将其归类为『{qname}』。"
+
             explain_str = (
                 f"\n\n**针对您疑问的解释**：\n"
-                f"虽然该节点的责任度算出来只有 **{n['responsibility']:.4f}**，低于全网中位数（{median_resp:.4f}），"
-                f"从纯数学最大流角度看破坏力有限。但它是整张供应链网络的**源头节点（Source）**，"
-                f"一旦断开将导致全链路断流，属于拓扑上的绝对割点。因此，系统算法结合了**业务先验兜底规则**，"
-                f"赋予了它最高级别的保护权重，将其作为『显性核心』进行防范。"
+                f"虽然该节点的责任度算出来是 **{resp_val:.4f}**，但从底层最大流博弈归因来看：{core_reason}"
+                f"因此，系统结合了业务先验规则，{action}"
             )
 
         return (
@@ -372,15 +376,10 @@ def main():
             qname = sel.get("quadrant", "")
             qcfg = QUADRANT_STYLE.get(qname, {"strategy": "未知象限"})
             
-            # 同样动态处理 Tab 1 里展示的策略，避免自相矛盾
-            display_strategy = qcfg['strategy']
-            if sel["responsibility"] < median_responsibility and qname == "显性核心":
-                display_strategy = f"该节点近期暴露度极高，但拓扑责任度仅为 {sel['responsibility']:.4f}（低于中位数）。虽为全网源头节点，系统做了兜底预警，但需注意防范过度响应造成的资源浪费。"
-
             st.markdown(f"**象限**：<span style='color:{qcfg.get('color', '#000')};"
                         f"font-weight:bold'>{qname}</span>",
                         unsafe_allow_html=True)
-            st.markdown(f"**管理策略**：{display_strategy}")
+            st.markdown(f"**管理策略**：{qcfg['strategy']}")
             st.markdown(
                 f"**判定依据**：exposure={sel['exposure']:.2f} "
                 f"({'≥' if sel['exposure'] >= median_exposure else '<'} "
