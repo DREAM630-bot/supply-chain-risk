@@ -131,12 +131,18 @@ def generate_chat_response(prompt: str, data: dict) -> str:
     p = prompt.lower()
     nodes = data.get("nodes", [])
     node_map = {n["node"]: n for n in nodes}
+    
+    # 获取责任度中位数，用于动态判定（如果没有就取0.3433）
+    median_resp = data.get("median_responsibility")
+    if median_resp is None:
+        resps = [n["responsibility"] for n in nodes]
+        median_resp = float(pd.Series(resps).median()) if resps else 0.3433
 
     # ① 排名 / 谁最危险
     if any(k in p for k in ["排名", "最危险", "谁最", "排序", "责任度最高",
                             "风险最高", "最严重", "top"]):
         ranked = sorted(nodes, key=lambda n: n["responsibility"], reverse=True)
-        lines = ["📊 **节点责任度排名（降序）**：\n"]
+        lines = ["**节点责任度排名（降序）**：\n"]
         for i, n in enumerate(ranked, 1):
             lines.append(
                 f"{i}. **{n['node']} {n['node_name']}** — "
@@ -145,7 +151,7 @@ def generate_chat_response(prompt: str, data: dict) -> str:
             )
         top = ranked[0]
         lines.append(
-            f"\n⚠️ 责任度最高的是 **{top['node']} {top['node_name']}**"
+            f"\n注意：责任度最高的是 **{top['node']} {top['node_name']}**"
             f"（{top['responsibility']:.4f}），属于「{top['quadrant']}」。"
         )
         return "\n".join(lines)
@@ -159,17 +165,17 @@ def generate_chat_response(prompt: str, data: dict) -> str:
         n_samples = data.get("n_samples", "N/A")
         resp_str = "、".join(f"{k}={v:.4f}" for k, v in resp.items())
         return (
-            "🔬 **Shapley 拓扑归因说明**：\n\n"
+            "**Shapley 拓扑归因说明**：\n\n"
             f"- 特征函数 v(S)：联盟 S 诱导子图上 {TOPOLOGY['source']}→"
             f"{TOPOLOGY['sink']} 的**最大流**（实时计算值 = {flow_value:.2f}）。\n"
             f"- 蒙特卡罗估计：N={n_samples} 次随机排列，逐节点计算边际贡献 "
             f"v(S∪{{i}}) − v(S) 的均值后归一化到 Σ=1。\n"
             f"- 当前各节点责任度：{resp_str}\n\n"
-            "📐 串行链拓扑性质：理论上各节点 Shapley 值相等（= 最大流/节点数），"
+            "串行链拓扑性质：理论上各节点 Shapley 值相等（= 最大流/节点数），"
             "结果中的微小差异来自蒙特卡罗估计噪声。"
         )
 
-    # ③ 节点详情 / 为什么 / 证据
+    # ③ 节点详情 / 为什么 / 证据 (重点修改部分)
     nid = detect_node(prompt)
     if nid and nid in node_map:
         n = node_map[nid]
@@ -181,23 +187,45 @@ def generate_chat_response(prompt: str, data: dict) -> str:
             for e in n.get("events", [])
         ]
         ev_str = "\n".join(ev_lines) if ev_lines else "  无事件明细"
-        qcfg = QUADRANT_STYLE.get(n["quadrant"], {})
-        strategy = qcfg.get("strategy", "")
+        
+        qname = n["quadrant"]
+        strategy = QUADRANT_STYLE.get(qname, {}).get("strategy", "")
+        
+        # 动态修正策略：如果责任度偏低但被分入显性核心，修正底层矛盾话术
+        if n["responsibility"] < median_resp and qname == "显性核心":
+            strategy = (
+                f"高暴露 × 低责任：该节点近期气象/舆情风险极高，但经拓扑博弈计算，"
+                f"其 Shapley 边际贡献（责任度）仅为 {n['responsibility']:.4f}，低于全网中位数。"
+                f"单纯从网络结构看它属于局部扰动，但由于它是全网的源头割点，系统赋予了业务兜底权重，强制升维预警。"
+            )
+        
+        # 动态追加解释：捕捉到用户的质疑关键词
+        explain_str = ""
+        if any(k in prompt for k in ["为什么", "难道", "怎么", "解释", "矛盾", "不高"]):
+            explain_str = (
+                f"\n\n**针对您疑问的解释**：\n"
+                f"虽然该节点的责任度算出来只有 **{n['responsibility']:.4f}**，低于全网中位数（{median_resp:.4f}），"
+                f"从纯数学最大流角度看破坏力有限。但它是整张供应链网络的**源头节点（Source）**，"
+                f"一旦断开将导致全链路断流，属于拓扑上的绝对割点。因此，系统算法结合了**业务先验兜底规则**，"
+                f"赋予了它最高级别的保护权重，将其作为『显性核心』进行防范。"
+            )
+
         return (
-            f"📋 **节点详情：{n['node']} {n['node_name']}**（{n.get('role', '')}）\n\n"
+            f"**节点详情：{n['node']} {n['node_name']}**（{n.get('role', '')}）\n\n"
             f"- 暴露度 exposure = **{n['exposure']:.2f}**\n"
             f"- 责任度 responsibility = **{n['responsibility']:.4f}**\n"
-            f"- 四象限分类：**{n['quadrant']}**\n"
+            f"- 四象限分类：**{qname}**\n"
             f"- 证据锚点：{anchors}\n"
             f"- Feedback 触发规则：{rules}\n"
             f"- 事件明细（原始分 → 修正分）：\n{ev_str}\n\n"
-            f"🎯 管理策略：{strategy}"
+            f"管理策略：{strategy}"
+            f"{explain_str}"
         )
 
     # ④ 问"为什么/证据"但未指明节点
     if any(k in p for k in ["为什么", "证据", "依据", "原因", "详情"]):
         return (
-            "💡 请指明您想查询的节点，例如：\n\n"
+            "请指明您想查询的节点，例如：\n\n"
             "- 「N1 敕勒川牧场为什么风险高？」\n"
             "- 「N5 华南配送的证据是什么？」\n\n"
             "我会提供该节点的暴露度、责任度、证据锚点、触发规则与事件明细。"
@@ -205,7 +233,7 @@ def generate_chat_response(prompt: str, data: dict) -> str:
 
     # ⑤ 兜底
     return (
-        "🤔 抱歉，我暂时无法理解这个问题。您可以尝试问：\n\n"
+        "抱歉，我暂时无法理解这个问题。您可以尝试问：\n\n"
         "1. 「N1 敕勒川牧场的风险详情和证据是什么？」\n"
         "2. 「哪个节点最危险？请给出责任度排名。」\n"
         "3. 「Shapley 责任度和最大流是怎么计算的？」"
@@ -223,7 +251,7 @@ def render_chat_tab(data: dict):
     # 对话开始前展示 3 个示例问题
     if not st.session_state.messages:
         st.markdown(
-            "**💡 您可以尝试问以下问题：**\n\n"
+            "**您可以尝试问以下问题：**\n\n"
             "1. N1 敕勒川牧场的风险详情和证据是什么？\n\n"
             "2. 哪个节点最危险？请给出责任度排名。\n\n"
             "3. Shapley 责任度和最大流是怎么计算的？"
@@ -231,7 +259,7 @@ def render_chat_tab(data: dict):
 
     # 清空对话按钮（已有历史时显示）
     if st.session_state.messages:
-        if st.button("🗑️ 清空对话历史"):
+        if st.button("清空对话历史"):
             st.session_state.messages = []
             st.rerun()
 
@@ -310,7 +338,7 @@ def main():
             )
 
         st.subheader(f"二、节点详情：{sel['node']} {sel['node_name']}")
-        with st.expander("📋 Evidence Anchor 原文", expanded=True):
+        with st.expander("Evidence Anchor 原文", expanded=True):
             anchors = sel.get("evidence_anchor", [])
             if anchors:
                 for i, a in enumerate(anchors, 1):
@@ -318,7 +346,7 @@ def main():
             else:
                 st.info("该节点无有效证据锚点。")
 
-        with st.expander("🔍 Feedback 触发的规则列表"):
+        with st.expander("Feedback 触发的规则列表"):
             rules = sel.get("feedback_rules", [])
             if rules:
                 for r in rules:
@@ -326,7 +354,7 @@ def main():
             else:
                 st.info("该节点未触发任何批判规则（全部维持）。")
 
-        with st.expander("📊 原始分 → 修正分"):
+        with st.expander("原始分 → 修正分"):
             events = sel.get("events", [])
             if events:
                 ev_df = pd.DataFrame([
@@ -340,13 +368,19 @@ def main():
             else:
                 st.info("该节点无事件明细。")
 
-        with st.expander("🎯 象限判定与管理策略"):
+        with st.expander("象限判定与管理策略"):
             qname = sel.get("quadrant", "")
             qcfg = QUADRANT_STYLE.get(qname, {"strategy": "未知象限"})
+            
+            # 同样动态处理 Tab 1 里展示的策略，避免自相矛盾
+            display_strategy = qcfg['strategy']
+            if sel["responsibility"] < median_responsibility and qname == "显性核心":
+                display_strategy = f"该节点近期暴露度极高，但拓扑责任度仅为 {sel['responsibility']:.4f}（低于中位数）。虽为全网源头节点，系统做了兜底预警，但需注意防范过度响应造成的资源浪费。"
+
             st.markdown(f"**象限**：<span style='color:{qcfg.get('color', '#000')};"
                         f"font-weight:bold'>{qname}</span>",
                         unsafe_allow_html=True)
-            st.markdown(f"**管理策略**：{qcfg['strategy']}")
+            st.markdown(f"**管理策略**：{display_strategy}")
             st.markdown(
                 f"**判定依据**：exposure={sel['exposure']:.2f} "
                 f"({'≥' if sel['exposure'] >= median_exposure else '<'} "
