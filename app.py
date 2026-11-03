@@ -34,7 +34,8 @@ if not st.session_state.logged_in:
         if st.button("登录系统", type="primary", use_container_width=True):
             if user_input == VALID_USERNAME and pass_input == VALID_PASSWORD:
                 st.session_state.logged_in = True
-                st.experimental_rerun() # 登录成功，放行
+                st.session_state.login_triggered = True 
+                st.success("登录成功，正在跳转系统主页...")
             else:
                 st.error("账号或密码错误，请重试。")
     st.stop() # 没登录，后面的所有功能都不会加载
