@@ -10,6 +10,35 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from openai import OpenAI
+import streamlit as st
+
+# 1. 页面配置（确保整个文件只有这一处 st.set_page_config）
+st.set_page_config(page_title="供应链风险全景测度系统", layout="wide")
+
+# ================= 登录拦截模块 =================
+VALID_USERNAME = "admin123456"       # 账号
+VALID_PASSWORD = "qwe123456"      # 密码
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    # 在页面居中显示登录框
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>供应链风险全景测度系统</h2>", unsafe_allow_html=True)
+        st.info("请评委老师输入体验账号和密码：")
+        user_input = st.text_input("账号")
+        pass_input = st.text_input("密码", type="password")
+        
+        if st.button("登录系统", type="primary", use_container_width=True):
+            if user_input == VALID_USERNAME and pass_input == VALID_PASSWORD:
+                st.session_state.logged_in = True
+                st.experimental_rerun() # 登录成功，放行
+            else:
+                st.error("账号或密码错误，请重试。")
+    st.stop() # 没登录，后面的所有功能都不会加载
+# ================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = PROJECT_ROOT / "data" / "results.json"
@@ -205,7 +234,7 @@ def main():
     st.title("供应链风险全景测度系统")
 
     data = load_results()
-    st.warning(data.get("disclaimer", ""))
+    #st.warning(data.get("disclaimer", ""))
     
     nodes = data.get("nodes", [])
     if not nodes:
