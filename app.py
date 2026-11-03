@@ -10,6 +10,45 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from openai import OpenAI
+# ==========================================
+# 1. 页面全局配置
+# ==========================================
+st.set_page_config(page_title="供应链风险全景测度系统", layout="wide")
+
+# ==========================================
+# 2. 账号密码登录拦截
+# ==========================================
+VALID_USERNAME = "admin123456"       # 账号
+VALID_PASSWORD = "qwe123456"         # 密码
+
+# 初始化登录状态
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+# 如果未登录，显示登录界面并拦截
+if not st.session_state.logged_in:
+    st.title("供应链风险全景测度系统")
+    st.info("请输入账号和密码：")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        user_input = st.text_input("账号")
+    with col2:
+        pass_input = st.text_input("密码", type="password")
+        
+    if st.button("登录系统", type="primary"):
+        if user_input == VALID_USERNAME and pass_input == VALID_PASSWORD:
+            st.session_state.logged_in = True
+            st.rerun()  # 登录成功后刷新页面，进入主系统
+        else:
+            st.error("账号或密码错误，请重试。")
+            
+    st.stop()  # 拦截：未登录者不允许执行后面的任何代码
+
+# ==========================================
+# 3. 登录成功后的主系统代码
+# ==========================================
+st.sidebar.success(f"欢迎登录！当前用户：{user_input}")
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = PROJECT_ROOT / "data" / "results.json"
