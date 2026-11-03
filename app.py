@@ -48,7 +48,7 @@ if not st.session_state.logged_in:
 # ==========================================
 # 3. 登录成功后的主系统代码
 # ==========================================
-st.sidebar.success(f"欢迎登录！当前用户：{user_input}")
+st.sidebar.success(f"欢迎登录！当前用户：{VALID_USERNAME}")
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = PROJECT_ROOT / "data" / "results.json"
