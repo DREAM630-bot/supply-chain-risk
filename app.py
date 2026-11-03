@@ -27,7 +27,7 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<h2 style='text-align: center;'>供应链风险全景测度系统</h2>", unsafe_allow_html=True)
-        st.info("请评委老师输入体验账号和密码：")
+        st.info("输入体验账号和密码：")
         user_input = st.text_input("账号")
         pass_input = st.text_input("密码", type="password")
         
