@@ -53,7 +53,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = PROJECT_ROOT / "data" / "results.json"
 
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-from shapley_engine import build_graph, compute_max_flow, TOPOLOGY  # noqa: E402
+from shapley_engine import build_graph, TOPOLOGY  # noqa: E402
 
 # ==========================================
 # 大模型配置
